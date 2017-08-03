@@ -381,7 +381,7 @@ class InverseProbabilityWeighting(object):
         if not propensity_score_model:
             self.propensity_score_model = None
 
-    def estimate_ATE(self, X, assignment, outcome, confounder_types, score=None, n_neighbors=5, bootstrap=False, weights='weights')):
+    def estimate_ATE(self, X, assignment, outcome, confounder_types, score=None, weights='weights'):
         if not score:
             X = self.score(X, confounder_types, assignment)
             score = 'propensity score'
@@ -389,7 +389,7 @@ class InverseProbabilityWeighting(object):
             X[weights] = (X[assignment] == 1)*1./X[score] + (X[assignment] == 0)*1. / (1. - X[score])
         model = WLS(X[outcome], X[[assignment]], weights=X[weights])
         result = model.fit()
-        return result.conf_int()[0][0], result.params[assignment], result.conf_int()[[1][0]
+        return result.conf_int()[0][0], result.params[assignment], result.conf_int()[1][0]
 
 
     def score(self, X, confounder_types, assignment='assignment', store_model_fit=False, intercept=True):
