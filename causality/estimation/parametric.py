@@ -1,5 +1,5 @@
 import pandas as pd
-from statsmodels.regression.linear_model import OLS
+from statsmodels.regression.linear_model import OLS, WLS
 from statsmodels.robust.robust_linear_model import RLM
 from statsmodels.discrete.discrete_model import Logit
 from sklearn.neighbors import NearestNeighbors
@@ -376,3 +376,58 @@ class PropensityScoreMatching(object):
             pp.show()
 
 
+class InverseProbabilityWeighting(object):
+    def __init__(self, propensity_score_model=None):
+        if not propensity_score_model:
+            self.propensity_score_model = None
+
+    def estimate_ATE(self, X, assignment, outcome, confounder_types, score=None, n_neighbors=5, bootstrap=False, weights='weights')):
+        if not score:
+            X = self.score(X, confounder_types, assignment)
+            score = 'propensity score'
+        if weights not in X.columns:
+            X[weights] = (X[assignment] == 1)*1./X[score] + (X[assignment] == 0)*1. / (1. - X[score])
+        model = WLS(X[outcome], X[[assignment]], weights=X[weights])
+        result = model.fit()
+        return result.conf_int()[0][0], result.params[assignment], result.conf_int()[[1][0]
+
+
+    def score(self, X, confounder_types, assignment='assignment', store_model_fit=False, intercept=True):
+        """
+        Fit a propensity score model using the data in X and the confounders listed in confounder_types. This adds
+        the propensity scores to the dataframe, and returns the new dataframe.
+
+        :param X: The data set, with (at least) an assignment, set of confounders, and an outcome
+        :param assignment: A categorical variable (currently, 0 or 1) indicating test or control group, resp.
+        :param outcome: The outcome of interest.  Should be real-valued or ordinal.
+        :param confounder_types: A dictionary of variable_name: variable_type pairs of strings, where
+        variable_type is in {'c', 'o', 'd'}, for 'continuous', 'ordinal', and 'discrete'.
+        :param store_model_fit: boolean, Whether to store the model as an attribute of the class, as
+        self.propensity_score_model
+        :param intercept: Whether to include an intercept in the logistic regression model
+        :return: A new dataframe with the propensity scores included
+        """
+        df = X[[assignment]].copy()
+        regression_confounders = []
+        for confounder, var_type in confounder_types.items():
+            if var_type == 'o' or var_type == 'u':
+                c_dummies = pd.get_dummies(X[[confounder]], prefix=confounder)
+                if len(c_dummies.columns) == 1:
+                    df = pd.concat([df, c_dummies[c_dummies.columns]], axis=1)
+                    regression_confounders.extend(c_dummies.columns)
+                else:
+                    df = pd.concat([df, c_dummies[c_dummies.columns[1:]]], axis=1)
+                    regression_confounders.extend(c_dummies.columns[1:])
+            else:
+                regression_confounders.append(confounder)
+                df.loc[:, confounder] = X[confounder].copy()
+                df.loc[:, confounder] = X[confounder].copy()
+        if intercept:
+            df.loc[:, 'intercept'] = 1.
+            regression_confounders.append('intercept')
+        logit = Logit(df[assignment], df[regression_confounders])
+        model = logit.fit()
+        if store_model_fit:
+            self.propensity_score_model = model
+        X.loc[:, 'propensity score'] = model.predict(df[regression_confounders])
+        return X
